@@ -1,0 +1,119 @@
+---
+title: "Practical Machine Learning - Final Project"
+author: "Simona Maccarrone"
+date: "26 August 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement, a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+# Data Source
+
+The training data for this project are available here:
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+The test data are available here:
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)  
+
+The data for this project come from this source: [http://groupware.les.inf.puc-rio.br/har](). If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+# Explore and clean the data
+
+The data were imported with the following code:  
+
+```{r}
+training <- read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv',
+                     na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv',
+                    na.strings=c("NA","#DIV/0!",""))
+```
+
+Then I started to explore those I am going to use for the training:
+
+```{r eval=FALSE}
+summary(training)
+```
+
+I noticed that a lot of predictors had more than 90% of NAs so I decided to discard them since they won't contribute in a relevant way:
+
+```{r}
+#selection of the columns with the maximum number of useful observables for both training  
+#and testing data sets
+predictors1 <- colnames(training)[colSums(is.na(training))==0]
+predictors2 <- colnames(testing)[colSums(is.na(testing))==0]
+#subsets of training and test data only with the the predictors selected above
+train_sub <- subset(training, select=predictors1)
+test_sub <- subset(testing, select=predictors2)
+```
+I also deleted the first seven columns since they do not influence the predictions:
+```{r}
+train_sub[1:7] <- NULL
+test_sub[1:7] <- NULL
+```
+and in addition shuffled the training data since they were listed according to *user_name* and _classe_:
+```{r}
+training_sub <- train_sub[sample(nrow(train_sub)),]
+```
+
+# Cross Validation
+The predictive model will be trained on a 0.7 portion of the *train_sub* data and validated on the remaining 0.3. The partition is done with the following:
+```{r message=FALSE}
+library(caret) #loading the caret package
+set.seed(1000)
+inTrain <- createDataPartition(training_sub$classe, p=0.75, list = FALSE) #create a partition
+train <- training_sub[inTrain,] # new training set with 75% of the observables
+validation <- training_sub[-inTrain,] # validation data set with 25% of the observables
+```
+```{r}
+dim(train); dim(validation)
+```
+# Predictions
+## Decision Tree
+```{r results='hide'}
+library(rpart)
+model1 <- rpart(classe ~., data=train, method="class")
+```
+```{r message=FALSE, warning=FALSE}
+library(rattle)
+fancyRpartPlot(model1)
+```
+
+```{r}
+#Testing on the evaluation data set
+pred_model1 <- predict(model1, validation, type="class")
+confusionMatrix(pred_model1, validation$classe)
+```
+The accuracy was not so satisfactory.
+
+## Random Forest
+I first runned the Random Forest with default parameters and pca as method of preprocessing and I realized it was very very slow. Hence I looked up in internet how to solve the problem.  
+First step I used the two logical cores that I have on my laptop as follows:
+```{r message=FALSE}
+library(doParallel)
+registerDoParallel(cores=2)
+```
+then I runned the Random Forest limiting the number of trees to 100:
+```{r message=FALSE}
+library(randomForest)
+model2 <- train(classe~., data=train, method="rf", preProcess="pca", ntree=100, 
+                do.trace=TRUE)
+```
+The OBB was around 3%. Since I was enough satisfied with the results, I moved to test the model on the validation data set:
+```{r}
+pred_model2 <- predict(model2, validation, type="raw")
+# type="class" was giving me some error message
+confusionMatrix(pred_model2, validation$classe)
+```
+The accuracy was very high.  
+N. B. I also tried ntree=200, it was slower and the OBB did not decrease that much.  
+I decided then to use this model for predicting the _classe_ of the test data set (now *test_sub* after the cleaning process).
+```{r}
+# making the prediction for the 20 cases
+predfinal_model2 <- predict(model2, test_sub, type="raw") 
+```
+The predictions I got using the model were 95% correct.
